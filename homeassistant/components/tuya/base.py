@@ -13,6 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity
 
 from .const import DOMAIN, LOGGER, TUYA_HA_SIGNAL_UPDATE_ENTITY, DPCode, DPType
+from .device_specific import DEVICE_SPECIFIC_INT_BASE
 from .util import remap_value
 
 
@@ -76,12 +77,14 @@ class IntegerTypeData:
         return remap_value(value, from_min, from_max, self.min, self.max, reverse)
 
     @classmethod
-    def from_json(cls, dpcode: DPCode, data: str) -> IntegerTypeData | None:
+    def from_json(
+        cls, dpcode: DPCode, product_id: str, data: str
+    ) -> IntegerTypeData | None:
         """Load JSON string and return a IntegerTypeData object."""
         if not (parsed := json.loads(data)):
             return None
 
-        return cls(
+        result: IntegerTypeData = cls(
             dpcode,
             min=int(parsed["min"]),
             max=int(parsed["max"]),
@@ -90,6 +93,14 @@ class IntegerTypeData:
             unit=parsed.get("unit"),
             type=parsed.get("type"),
         )
+
+        # Some devices use other bases than default
+        if product_id in DEVICE_SPECIFIC_INT_BASE:
+            device: dict[str, int] = DEVICE_SPECIFIC_INT_BASE[product_id]
+            result.base_value = device["base_value"]
+            result.base_step = device["base_step"]
+
+        return result
 
 
 @dataclass
@@ -235,16 +246,12 @@ class TuyaEntity(Entity):
                 ):
                     if not (
                         integer_type := IntegerTypeData.from_json(
-                            dpcode, getattr(self.device, key)[dpcode].values
+                            dpcode,
+                            self.device.product_id,
+                            getattr(self.device, key)[dpcode].values,
                         )
                     ):
                         continue
-
-                    # Workaround for BHT-002 Thermostat devices which use the base 2
-                    # instead of 10 during scaling of the integer value (but not the
-                    # step). This is a violation from the specification.
-                    if self.device.product_id == "IAYz2WK1th0cMLmL":
-                        integer_type.base_value = 2
 
                     return integer_type
 
