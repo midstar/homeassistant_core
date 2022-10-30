@@ -19,6 +19,7 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT
+from homeassistant.components.climate.const import PRESET_ECO, PRESET_NONE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -124,6 +125,7 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
     _hvac_to_tuya: dict[str, str]
     _set_humidity: IntegerTypeData | None = None
     _set_temperature: IntegerTypeData | None = None
+    _attr_preset_mode: str = PRESET_NONE
     entity_description: TuyaClimateEntityDescription
 
     def __init__(
@@ -136,6 +138,7 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         self._attr_target_temperature_step = 1.0
         self._attr_supported_features = 0
         self.entity_description = description
+        self._attr_preset_mode = PRESET_NONE
 
         super().__init__(device, device_manager)
 
@@ -195,6 +198,7 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         # it to define min, max & step temperatures
         if self._set_temperature:
             self._attr_supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE
+            self._attr_supported_features |= ClimateEntityFeature.PRESET_MODE
             self._attr_max_temp = self._set_temperature.max_scaled
             self._attr_min_temp = self._set_temperature.min_scaled
             self._attr_target_temperature_step = self._set_temperature.step_scaled
@@ -469,3 +473,29 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         # Fake turn off
         if HVACMode.OFF in self.hvac_modes:
             self.set_hvac_mode(HVACMode.OFF)
+
+    @property
+    def preset_modes(self):
+        return [
+            PRESET_NONE,
+            PRESET_ECO
+        ]
+
+    def set_preset_mode(self, preset_mode: str) -> None:
+        """Set Eco mode on or off"""
+        if not preset_mode in self.preset_modes:
+            return
+        LOGGER.debug(f"called set preset with {preset_mode}")
+        self._attr_preset_mode=preset_mode
+        send_value=False
+        if(preset_mode==PRESET_ECO):
+            send_value =True
+        LOGGER.debug(f"sending command for preset with value {send_value}")
+        self._send_command(
+            [
+                {
+                    "code": "eco",
+                    "value": send_value,
+                }
+            ]
+        )
