@@ -481,6 +481,12 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
             PRESET_ECO
         ]
 
+    @property
+    def preset_mode(self) -> str | None:
+        """Return preset mode eco if on, off otherwise."""
+        eco_mode = self.device.status.get(DPCode.ECO)
+        return PRESET_ECO if eco_mode else PRESET_NONE
+
     def set_preset_mode(self, preset_mode: str) -> None:
         """Set Eco mode on or off"""
         if not preset_mode in self.preset_modes:
@@ -494,7 +500,7 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         self._send_command(
             [
                 {
-                    "code": "eco",
+                    "code": DPCode.ECO,
                     "value": send_value,
                 }
             ]
