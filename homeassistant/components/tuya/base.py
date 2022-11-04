@@ -94,8 +94,6 @@ class IntegerTypeData:
             type=parsed.get("type"),
         )
 
-        print(product_id + ":\n" + str(result) + "\n\n")
-
         # Some devices use other bases than default
         if product_id in DEVICE_SPECIFIC_INT_BASE:
             device: dict[str, int] = DEVICE_SPECIFIC_INT_BASE[product_id]
