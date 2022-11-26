@@ -7,6 +7,8 @@ from typing import Any
 from tuya_iot import TuyaDevice, TuyaDeviceManager
 
 from homeassistant.components.climate import (
+    PRESET_ECO,
+    PRESET_NONE,
     SWING_BOTH,
     SWING_HORIZONTAL,
     SWING_OFF,
@@ -19,14 +21,20 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT
-from homeassistant.components.climate.const import PRESET_ECO, PRESET_NONE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import HomeAssistantTuyaData
 from .base import IntegerTypeData, TuyaEntity
-from .const import DOMAIN, LOGGER, TUYA_DISCOVERY_NEW, DPCode, DPType
+from .const import (
+    CONF_INSTRUCTIONS_TYPE,
+    DOMAIN,
+    LOGGER,
+    TUYA_DISCOVERY_NEW,
+    DPCode,
+    DPType,
+)
 
 TUYA_HVAC_TO_HA = {
     "auto": HVACMode.HEAT_COOL,
@@ -106,6 +114,7 @@ async def async_setup_entry(
                         device,
                         hass_data.device_manager,
                         CLIMATE_DESCRIPTIONS[device.category],
+                        instruction_type=entry.data[CONF_INSTRUCTIONS_TYPE],
                     )
                 )
         async_add_entities(entities)
@@ -133,28 +142,39 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         device: TuyaDevice,
         device_manager: TuyaDeviceManager,
         description: TuyaClimateEntityDescription,
+        instruction_type: str = "Standard",
     ) -> None:
         """Determine which values to use."""
         self._attr_target_temperature_step = 1.0
         self._attr_supported_features = 0
         self.entity_description = description
         self._attr_preset_mode = PRESET_NONE
+        LOGGER.debug("Created device with instruction type %s", instruction_type)
 
-        super().__init__(device, device_manager)
-
+        super().__init__(device, device_manager, instruction_type=instruction_type)
         # If both temperature values for celsius and fahrenheit are present,
         # use whatever the device is set to, with a fallback to celsius.
         prefered_temperature_unit = None
         if all(
             dpcode in device.status
-            for dpcode in (DPCode.TEMP_CURRENT, DPCode.TEMP_CURRENT_F)
+            for dpcode in (
+                self._get_right_dpcode(DPCode.TEMP_CURRENT),
+                self._get_right_dpcode(DPCode.TEMP_CURRENT_F),
+            )
         ) or all(
-            dpcode in device.status for dpcode in (DPCode.TEMP_SET, DPCode.TEMP_SET_F)
+            dpcode in device.status
+            for dpcode in (
+                self._get_right_dpcode(DPCode.TEMP_SET),
+                self._get_right_dpcode(DPCode.TEMP_SET_F),
+            )
         ):
             prefered_temperature_unit = TEMP_CELSIUS
             if any(
                 "f" in device.status[dpcode].lower()
-                for dpcode in (DPCode.C_F, DPCode.TEMP_UNIT_CONVERT)
+                for dpcode in (
+                    self._get_right_dpcode(DPCode.C_F),
+                    self._get_right_dpcode(DPCode.TEMP_UNIT_CONVERT),
+                )
                 if isinstance(device.status.get(dpcode), str)
             ):
                 prefered_temperature_unit = TEMP_FAHRENHEIT
@@ -164,10 +184,18 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
         # Figure out current temperature, use preferred unit or what is available
         celsius_type = self.find_dpcode(
-            (DPCode.TEMP_CURRENT, DPCode.UPPER_TEMP), dptype=DPType.INTEGER
+            (
+                self._get_right_dpcode(DPCode.TEMP_CURRENT),
+                self._get_right_dpcode(DPCode.UPPER_TEMP),
+            ),
+            dptype=DPType.INTEGER,
         )
         farhenheit_type = self.find_dpcode(
-            (DPCode.TEMP_CURRENT_F, DPCode.UPPER_TEMP_F), dptype=DPType.INTEGER
+            (
+                self._get_right_dpcode(DPCode.TEMP_CURRENT_F),
+                self._get_right_dpcode(DPCode.UPPER_TEMP_F),
+            ),
+            dptype=DPType.INTEGER,
         )
         if farhenheit_type and (
             prefered_temperature_unit == TEMP_FAHRENHEIT
@@ -181,10 +209,14 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
         # Figure out setting temperature, use preferred unit or what is available
         celsius_type = self.find_dpcode(
-            DPCode.TEMP_SET, dptype=DPType.INTEGER, prefer_function=True
+            self._get_right_dpcode(DPCode.TEMP_SET),
+            dptype=DPType.INTEGER,
+            prefer_function=True,
         )
         farhenheit_type = self.find_dpcode(
-            DPCode.TEMP_SET_F, dptype=DPType.INTEGER, prefer_function=True
+            self._get_right_dpcode(DPCode.TEMP_SET_F),
+            dptype=DPType.INTEGER,
+            prefer_function=True,
         )
         if farhenheit_type and (
             prefered_temperature_unit == TEMP_FAHRENHEIT
@@ -207,22 +239,30 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         self._attr_hvac_modes: list[str] = []
         self._hvac_to_tuya = {}
         if enum_type := self.find_dpcode(
-            DPCode.MODE, dptype=DPType.ENUM, prefer_function=True
+            self._get_right_dpcode(DPCode.MODE),
+            dptype=DPType.ENUM,
+            prefer_function=True,
         ):
             self._attr_hvac_modes = [HVACMode.OFF]
             for tuya_mode, ha_mode in TUYA_HVAC_TO_HA.items():
                 if tuya_mode in enum_type.range:
                     self._hvac_to_tuya[ha_mode] = tuya_mode
                     self._attr_hvac_modes.append(ha_mode)
-        elif self.find_dpcode(DPCode.SWITCH, prefer_function=True):
+        elif self.find_dpcode(
+            self._get_right_dpcode(DPCode.SWITCH), prefer_function=True
+        ):
             self._attr_hvac_modes = [
                 HVACMode.OFF,
                 description.switch_only_hvac_mode,
             ]
 
+        LOGGER.debug("the hvac modes are %s", self._attr_hvac_modes)
+
         # Determine dpcode to use for setting the humidity
         if int_type := self.find_dpcode(
-            DPCode.HUMIDITY_SET, dptype=DPType.INTEGER, prefer_function=True
+            self._get_right_dpcode(DPCode.HUMIDITY_SET),
+            dptype=DPType.INTEGER,
+            prefer_function=True,
         ):
             self._attr_supported_features |= ClimateEntityFeature.TARGET_HUMIDITY
             self._set_humidity = int_type
@@ -231,12 +271,15 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
         # Determine dpcode to use for getting the current humidity
         self._current_humidity = self.find_dpcode(
-            DPCode.HUMIDITY_CURRENT, dptype=DPType.INTEGER
+            self._get_right_dpcode(DPCode.HUMIDITY_CURRENT), dptype=DPType.INTEGER
         )
 
         # Determine fan modes
         if enum_type := self.find_dpcode(
-            (DPCode.FAN_SPEED_ENUM, DPCode.WINDSPEED),
+            (
+                self._get_right_dpcode(DPCode.FAN_SPEED_ENUM),
+                self._get_right_dpcode(DPCode.WINDSPEED),
+            ),
             dptype=DPType.ENUM,
             prefer_function=True,
         ):
@@ -246,10 +289,10 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         # Determine swing modes
         if self.find_dpcode(
             (
-                DPCode.SHAKE,
-                DPCode.SWING,
-                DPCode.SWITCH_HORIZONTAL,
-                DPCode.SWITCH_VERTICAL,
+                self._get_right_dpcode(DPCode.SHAKE),
+                self._get_right_dpcode(DPCode.SWING),
+                self._get_right_dpcode(DPCode.SWITCH_HORIZONTAL),
+                self._get_right_dpcode(DPCode.SWITCH_VERTICAL),
             ),
             prefer_function=True,
         ):
@@ -270,8 +313,19 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
         # Log unknown modes
         if enum_type := self.find_dpcode(
-            DPCode.MODE, dptype=DPType.ENUM, prefer_function=True
+            self._get_right_dpcode(DPCode.MODE),
+            dptype=DPType.ENUM,
+            prefer_function=True,
         ):
+            LOGGER.debug(
+                "in registration instruction is %s and description %s",
+                self._instruction_type,
+                self.entity_description.key,
+            )
+            if self._instruction_type == "DP Instructions":
+                if self.entity_description.key == "wk":
+                    TUYA_HVAC_TO_HA["0"] = HVACMode.AUTO
+                    TUYA_HVAC_TO_HA["1"] = HVACMode.HEAT_COOL
             for tuya_mode in enum_type.range:
                 if tuya_mode not in TUYA_HVAC_TO_HA:
                     LOGGER.warning(
@@ -282,18 +336,28 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
     def set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
-        commands = [{"code": DPCode.SWITCH, "value": hvac_mode != HVACMode.OFF}]
+        commands = [
+            {
+                "code": self._get_right_dpcode(DPCode.SWITCH),
+                "value": hvac_mode != HVACMode.OFF,
+            }
+        ]
         if hvac_mode in self._hvac_to_tuya:
             commands.append(
-                {"code": DPCode.MODE, "value": self._hvac_to_tuya[hvac_mode]}
+                {
+                    "code": self._get_right_dpcode(DPCode.MODE),
+                    "value": self._hvac_to_tuya[hvac_mode],
+                }
             )
         self._send_command(commands)
 
     def set_fan_mode(self, fan_mode: str) -> None:
         """Set new target fan mode."""
-        self._send_command([{"code": DPCode.FAN_SPEED_ENUM, "value": fan_mode}])
+        self._send_command(
+            [{"code": self._get_right_dpcode(DPCode.FAN_SPEED_ENUM), "value": fan_mode}]
+        )
 
-    def set_humidity(self, humidity: float) -> None:
+    def set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
         if self._set_humidity is None:
             raise RuntimeError(
@@ -316,19 +380,19 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         self._send_command(
             [
                 {
-                    "code": DPCode.SHAKE,
+                    "code": self._get_right_dpcode(DPCode.SHAKE),
                     "value": swing_mode == SWING_ON,
                 },
                 {
-                    "code": DPCode.SWING,
+                    "code": self._get_right_dpcode(DPCode.SWING),
                     "value": swing_mode == SWING_ON,
                 },
                 {
-                    "code": DPCode.SWITCH_VERTICAL,
+                    "code": self._get_right_dpcode(DPCode.SWITCH_VERTICAL),
                     "value": swing_mode in (SWING_BOTH, SWING_VERTICAL),
                 },
                 {
-                    "code": DPCode.SWITCH_HORIZONTAL,
+                    "code": self._get_right_dpcode(DPCode.SWITCH_HORIZONTAL),
                     "value": swing_mode in (SWING_BOTH, SWING_HORIZONTAL),
                 },
             ]
@@ -412,16 +476,16 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         """Return hvac mode."""
         # If the switch off, hvac mode is off as well. Unless the switch
         # the switch is on or doesn't exists of course...
-        if not self.device.status.get(DPCode.SWITCH, True):
+        if not self.device.status.get(self._get_right_dpcode(DPCode.SWITCH), True):
             return HVACMode.OFF
 
-        if DPCode.MODE not in self.device.function:
-            if self.device.status.get(DPCode.SWITCH, False):
+        if self._get_right_dpcode(DPCode.MODE) not in self.device.function:
+            if self.device.status.get(self._get_right_dpcode(DPCode.SWITCH), False):
                 return self.entity_description.switch_only_hvac_mode
             return HVACMode.OFF
 
         if (
-            mode := self.device.status.get(DPCode.MODE)
+            mode := self.device.status.get(self._get_right_dpcode(DPCode.MODE))
         ) is not None and mode in TUYA_HVAC_TO_HA:
             return TUYA_HVAC_TO_HA[mode]
 
@@ -430,18 +494,26 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
     @property
     def fan_mode(self) -> str | None:
         """Return fan mode."""
-        return self.device.status.get(DPCode.FAN_SPEED_ENUM)
+        return self.device.status.get(self._get_right_dpcode(DPCode.FAN_SPEED_ENUM))
 
     @property
     def swing_mode(self) -> str:
         """Return swing mode."""
         if any(
-            self.device.status.get(dpcode) for dpcode in (DPCode.SHAKE, DPCode.SWING)
+            self.device.status.get(dpcode)
+            for dpcode in (
+                self._get_right_dpcode(DPCode.SHAKE),
+                self._get_right_dpcode(DPCode.SWING),
+            )
         ):
             return SWING_ON
 
-        horizontal = self.device.status.get(DPCode.SWITCH_HORIZONTAL)
-        vertical = self.device.status.get(DPCode.SWITCH_VERTICAL)
+        horizontal = self.device.status.get(
+            self._get_right_dpcode(DPCode.SWITCH_HORIZONTAL)
+        )
+        vertical = self.device.status.get(
+            self._get_right_dpcode(DPCode.SWITCH_VERTICAL)
+        )
         if horizontal and vertical:
             return SWING_BOTH
         if horizontal:
@@ -453,8 +525,10 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
     def turn_on(self) -> None:
         """Turn the device on, retaining current HVAC (if supported)."""
-        if DPCode.SWITCH in self.device.function:
-            self._send_command([{"code": DPCode.SWITCH, "value": True}])
+        if self._get_right_dpcode(DPCode.SWITCH) in self.device.function:
+            self._send_command(
+                [{"code": self._get_right_dpcode(DPCode.SWITCH), "value": True}]
+            )
             return
 
         # Fake turn on
@@ -466,8 +540,10 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
     def turn_off(self) -> None:
         """Turn the device on, retaining current HVAC (if supported)."""
-        if DPCode.SWITCH in self.device.function:
-            self._send_command([{"code": DPCode.SWITCH, "value": False}])
+        if self._get_right_dpcode(DPCode.SWITCH) in self.device.function:
+            self._send_command(
+                [{"code": self._get_right_dpcode(DPCode.SWITCH), "value": False}]
+            )
             return
 
         # Fake turn off
@@ -475,32 +551,30 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
             self.set_hvac_mode(HVACMode.OFF)
 
     @property
-    def preset_modes(self):
-        return [
-            PRESET_NONE,
-            PRESET_ECO
-        ]
+    def preset_modes(self) -> list[str] | None:
+        """Return available preset modes."""
+        return [PRESET_NONE, PRESET_ECO]
 
     @property
     def preset_mode(self) -> str | None:
         """Return preset mode eco if on, off otherwise."""
-        eco_mode = self.device.status.get(DPCode.ECO)
+        eco_mode = self.device.status.get(self._get_right_dpcode(DPCode.ECO))
         return PRESET_ECO if eco_mode else PRESET_NONE
 
     def set_preset_mode(self, preset_mode: str) -> None:
-        """Set Eco mode on or off"""
-        if not preset_mode in self.preset_modes:
+        """Set Eco mode on or off."""
+        if self.preset_modes is None or preset_mode not in self.preset_modes:
             return
-        LOGGER.debug(f"called set preset with {preset_mode}")
-        self._attr_preset_mode=preset_mode
-        send_value=False
-        if(preset_mode==PRESET_ECO):
-            send_value =True
-        LOGGER.debug(f"sending command for preset with value {send_value}")
+        LOGGER.debug("called set preset with %s", preset_mode)
+        self._attr_preset_mode = preset_mode
+        send_value = False
+        if preset_mode == PRESET_ECO:
+            send_value = True
+        LOGGER.debug("sending command for preset with value %s", send_value)
         self._send_command(
             [
                 {
-                    "code": DPCode.ECO,
+                    "code": self._get_right_dpcode(DPCode.ECO),
                     "value": send_value,
                 }
             ]
