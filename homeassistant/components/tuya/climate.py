@@ -27,14 +27,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import HomeAssistantTuyaData
 from .base import IntegerTypeData, TuyaEntity
-from .const import (
-    CONF_INSTRUCTIONS_TYPE,
-    DOMAIN,
-    LOGGER,
-    TUYA_DISCOVERY_NEW,
-    DPCode,
-    DPType,
-)
+
+from .const import DOMAIN, TUYA_DISCOVERY_NEW, DPCode, DPType, CONF_INSTRUCTIONS_TYPE, LOGGER
 
 TUYA_HVAC_TO_HA = {
     "auto": HVACMode.HEAT_COOL,
@@ -146,7 +140,6 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
     ) -> None:
         """Determine which values to use."""
         self._attr_target_temperature_step = 1.0
-        self._attr_supported_features = 0
         self.entity_description = description
         self._attr_preset_mode = PRESET_NONE
         LOGGER.debug("Created device with instruction type %s", instruction_type)
@@ -244,13 +237,20 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
             prefer_function=True,
         ):
             self._attr_hvac_modes = [HVACMode.OFF]
-            for tuya_mode, ha_mode in TUYA_HVAC_TO_HA.items():
-                if tuya_mode in enum_type.range:
+            unknown_hvac_modes: list[str] = []
+            for tuya_mode in enum_type.range:
+                if tuya_mode in TUYA_HVAC_TO_HA:
+                    ha_mode = TUYA_HVAC_TO_HA[tuya_mode]
                     self._hvac_to_tuya[ha_mode] = tuya_mode
                     self._attr_hvac_modes.append(ha_mode)
-        elif self.find_dpcode(
-            self._get_right_dpcode(DPCode.SWITCH), prefer_function=True
-        ):
+                else:
+                    unknown_hvac_modes.append(tuya_mode)
+
+            if unknown_hvac_modes:  # Tuya modes are presets instead of hvac_modes
+                self._attr_hvac_modes.append(description.switch_only_hvac_mode)
+                self._attr_preset_modes = unknown_hvac_modes
+                self._attr_supported_features |= ClimateEntityFeature.PRESET_MODE
+        elif self.find_dpcode(self._get_right_dpcode(DPCode.SWITCH), prefer_function=True):
             self._attr_hvac_modes = [
                 HVACMode.OFF,
                 description.switch_only_hvac_mode,
@@ -310,7 +310,6 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
     async def async_added_to_hass(self) -> None:
         """Call when entity is added to hass."""
         await super().async_added_to_hass()
-
         # Log unknown modes
         if enum_type := self.find_dpcode(
             self._get_right_dpcode(DPCode.MODE),
@@ -334,6 +333,7 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
                         self.device.name,
                     )
 
+
     def set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
         commands = [
@@ -349,6 +349,11 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
                     "value": self._hvac_to_tuya[hvac_mode],
                 }
             )
+        self._send_command(commands)
+
+    def set_preset_mode(self, preset_mode):
+        """Set new target preset mode."""
+        commands = [{"code": DPCode.MODE, "value": preset_mode}]
         self._send_command(commands)
 
     def set_fan_mode(self, fan_mode: str) -> None:
@@ -489,7 +494,23 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
         ) is not None and mode in TUYA_HVAC_TO_HA:
             return TUYA_HVAC_TO_HA[mode]
 
+        # If the switch is on, and the mode does not match any hvac mode.
+        if self.device.status.get(DPCode.SWITCH, False):
+            return self.entity_description.switch_only_hvac_mode
+
         return HVACMode.OFF
+
+    @property
+    def preset_mode(self) -> str | None:
+        """Return preset mode."""
+        if DPCode.MODE not in self.device.function:
+            return None
+
+        mode = self.device.status.get(DPCode.MODE)
+        if mode in TUYA_HVAC_TO_HA:
+            return None
+
+        return mode
 
     @property
     def fan_mode(self) -> str | None:
