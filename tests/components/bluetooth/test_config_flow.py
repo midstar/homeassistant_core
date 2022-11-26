@@ -2,14 +2,14 @@
 
 from unittest.mock import patch
 
+from bluetooth_adapters import DEFAULT_ADDRESS, AdapterDetails
+
 from homeassistant import config_entries
 from homeassistant.components.bluetooth.const import (
     CONF_ADAPTER,
     CONF_DETAILS,
     CONF_PASSIVE,
-    DEFAULT_ADDRESS,
     DOMAIN,
-    AdapterDetails,
 )
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.setup import async_setup_component
@@ -37,7 +37,6 @@ async def test_options_flow_disabled_not_setup(
             "id": 5,
             "type": "config_entries/get",
             "domain": "bluetooth",
-            "type_filter": "integration",
         }
     )
     response = await ws_client.receive_json()
@@ -341,7 +340,6 @@ async def test_options_flow_disabled_macos(
             "id": 5,
             "type": "config_entries/get",
             "domain": "bluetooth",
-            "type_filter": "integration",
         }
     )
     response = await ws_client.receive_json()
@@ -371,7 +369,6 @@ async def test_options_flow_enabled_linux(
             "id": 5,
             "type": "config_entries/get",
             "domain": "bluetooth",
-            "type_filter": "integration",
         }
     )
     response = await ws_client.receive_json()

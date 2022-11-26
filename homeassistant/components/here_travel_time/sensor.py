@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
@@ -17,10 +18,8 @@ from homeassistant.const import (
     ATTR_LONGITUDE,
     CONF_MODE,
     CONF_NAME,
-    CONF_UNIT_SYSTEM_IMPERIAL,
-    LENGTH_KILOMETERS,
-    LENGTH_MILES,
     TIME_MINUTES,
+    UnitOfLength,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType
@@ -29,7 +28,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.start import async_at_start
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import HereTravelTimeDataUpdateCoordinator
 from .const import (
     ATTR_DESTINATION,
     ATTR_DESTINATION_NAME,
@@ -42,6 +40,7 @@ from .const import (
     ICON_CAR,
     ICONS,
 )
+from .coordinator import HERERoutingDataUpdateCoordinator
 
 SCAN_INTERVAL = timedelta(minutes=5)
 
@@ -57,11 +56,19 @@ def sensor_descriptions(travel_mode: str) -> tuple[SensorEntityDescription, ...]
             native_unit_of_measurement=TIME_MINUTES,
         ),
         SensorEntityDescription(
-            name="Duration in Traffic",
+            name="Duration in traffic",
             icon=ICONS.get(travel_mode, ICON_CAR),
             key=ATTR_DURATION_IN_TRAFFIC,
             state_class=SensorStateClass.MEASUREMENT,
             native_unit_of_measurement=TIME_MINUTES,
+        ),
+        SensorEntityDescription(
+            name="Distance",
+            icon=ICONS.get(travel_mode, ICON_CAR),
+            key=ATTR_DISTANCE,
+            state_class=SensorStateClass.MEASUREMENT,
+            device_class=SensorDeviceClass.DISTANCE,
+            native_unit_of_measurement=UnitOfLength.KILOMETERS,
         ),
     )
 
@@ -89,7 +96,6 @@ async def async_setup_entry(
         )
     sensors.append(OriginSensor(entry_id, name, coordinator))
     sensors.append(DestinationSensor(entry_id, name, coordinator))
-    sensors.append(DistanceSensor(entry_id, name, coordinator))
     async_add_entities(sensors)
 
 
@@ -101,12 +107,11 @@ class HERETravelTimeSensor(SensorEntity, CoordinatorEntity):
         unique_id_prefix: str,
         name: str,
         sensor_description: SensorEntityDescription,
-        coordinator: HereTravelTimeDataUpdateCoordinator,
+        coordinator: HERERoutingDataUpdateCoordinator,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = sensor_description
-        self._attr_name = f"{name} {sensor_description.name}"
         self._attr_unique_id = f"{unique_id_prefix}_{sensor_description.key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, unique_id_prefix)},
@@ -114,6 +119,7 @@ class HERETravelTimeSensor(SensorEntity, CoordinatorEntity):
             name=name,
             manufacturer="HERE Technologies",
         )
+        self._attr_has_entity_name = True
 
     async def async_added_to_hass(self) -> None:
         """Wait for start so origin and destination entities can be resolved."""
@@ -146,7 +152,7 @@ class OriginSensor(HERETravelTimeSensor):
         self,
         unique_id_prefix: str,
         name: str,
-        coordinator: HereTravelTimeDataUpdateCoordinator,
+        coordinator: HERERoutingDataUpdateCoordinator,
     ) -> None:
         """Initialize the sensor."""
         sensor_description = SensorEntityDescription(
@@ -174,7 +180,7 @@ class DestinationSensor(HERETravelTimeSensor):
         self,
         unique_id_prefix: str,
         name: str,
-        coordinator: HereTravelTimeDataUpdateCoordinator,
+        coordinator: HERERoutingDataUpdateCoordinator,
     ) -> None:
         """Initialize the sensor."""
         sensor_description = SensorEntityDescription(
@@ -193,29 +199,3 @@ class DestinationSensor(HERETravelTimeSensor):
                 ATTR_LONGITUDE: self.coordinator.data[ATTR_DESTINATION].split(",")[1],
             }
         return None
-
-
-class DistanceSensor(HERETravelTimeSensor):
-    """Sensor holding information about the distance."""
-
-    def __init__(
-        self,
-        unique_id_prefix: str,
-        name: str,
-        coordinator: HereTravelTimeDataUpdateCoordinator,
-    ) -> None:
-        """Initialize the sensor."""
-        sensor_description = SensorEntityDescription(
-            name="Distance",
-            icon=ICONS.get(coordinator.config.travel_mode, ICON_CAR),
-            key=ATTR_DISTANCE,
-            state_class=SensorStateClass.MEASUREMENT,
-        )
-        super().__init__(unique_id_prefix, name, sensor_description, coordinator)
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the unit of measurement of the sensor."""
-        if self.coordinator.config.units == CONF_UNIT_SYSTEM_IMPERIAL:
-            return LENGTH_MILES
-        return LENGTH_KILOMETERS
