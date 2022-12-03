@@ -12,7 +12,14 @@ from tuya_iot import TuyaDevice, TuyaDeviceManager
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity
 
-from .const import DOMAIN, LOGGER, TUYA_HA_SIGNAL_UPDATE_ENTITY, DPCode, DPType
+from .const import (
+    DOMAIN,
+    INSTRUCTIONS_DP,
+    LOGGER,
+    TUYA_HA_SIGNAL_UPDATE_ENTITY,
+    DPCode,
+    DPType,
+)
 from .device_specific import DEVICE_SPECIFIC_INT_BASE
 from .util import remap_value
 
@@ -149,11 +156,17 @@ class TuyaEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, device: TuyaDevice, device_manager: TuyaDeviceManager) -> None:
+    def __init__(
+        self,
+        device: TuyaDevice,
+        device_manager: TuyaDeviceManager,
+        instruction_type: str = "Standard",
+    ) -> None:
         """Init TuyaHaEntity."""
         self._attr_unique_id = f"tuya.{device.id}"
         self.device = device
         self.device_manager = device_manager
+        self._instruction_type = instruction_type
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -169,6 +182,15 @@ class TuyaEntity(Entity):
     def available(self) -> bool:
         """Return if the device is available."""
         return self.device.online
+
+    def _get_right_dpcode(self, dpcode: DPCode) -> DPCode:
+        """Return the DPCode depending by selected instruction type and requested one if not exist."""
+        if self._instruction_type == INSTRUCTIONS_DP:
+            try:
+                return DPCode[dpcode.name + "_DP"]
+            except KeyError:
+                pass
+        return dpcode
 
     @overload
     def find_dpcode(
@@ -207,6 +229,7 @@ class TuyaEntity(Entity):
         dptype: DPType | None = None,
     ) -> DPCode | EnumTypeData | IntegerTypeData | None:
         """Find a matching DP code available on for this device."""
+        LOGGER.debug("seeking for DPCode of type: %s", self._instruction_type)
         if dpcodes is None:
             return None
 
@@ -225,16 +248,18 @@ class TuyaEntity(Entity):
             order.append("status")
 
         for dpcode in dpcodes:
+            current_dpcode = self._get_right_dpcode(dpcode)
             for key in order:
                 if dpcode not in getattr(self.device, key):
                     continue
                 if (
                     dptype == DPType.ENUM
-                    and getattr(self.device, key)[dpcode].type == DPType.ENUM
+                    and getattr(self.device, key)[current_dpcode].type == DPType.ENUM
                 ):
                     if not (
                         enum_type := EnumTypeData.from_json(
-                            dpcode, getattr(self.device, key)[dpcode].values
+                            current_dpcode,
+                            getattr(self.device, key)[current_dpcode].values,
                         )
                     ):
                         continue
@@ -242,13 +267,13 @@ class TuyaEntity(Entity):
 
                 if (
                     dptype == DPType.INTEGER
-                    and getattr(self.device, key)[dpcode].type == DPType.INTEGER
+                    and getattr(self.device, key)[current_dpcode].type == DPType.INTEGER
                 ):
                     if not (
                         integer_type := IntegerTypeData.from_json(
-                            dpcode,
+                            current_dpcode,
                             self.device.product_id,
-                            getattr(self.device, key)[dpcode].values,
+                            getattr(self.device, key)[current_dpcode].values,
                         )
                     ):
                         continue
@@ -256,7 +281,7 @@ class TuyaEntity(Entity):
                     return integer_type
 
                 if dptype not in (DPType.ENUM, DPType.INTEGER):
-                    return dpcode
+                    return current_dpcode
 
         return None
 
