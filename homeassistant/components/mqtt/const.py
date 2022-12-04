@@ -30,16 +30,8 @@ CONF_CLIENT_CERT = "client_cert"
 CONF_TLS_INSECURE = "tls_insecure"
 CONF_TLS_VERSION = "tls_version"
 
-CONFIG_ENTRY_IS_SETUP = "mqtt_config_entry_is_setup"
 DATA_MQTT = "mqtt"
-DATA_MQTT_SUBSCRIPTIONS_TO_RESTORE = "mqtt_client_subscriptions"
-DATA_MQTT_DISCOVERY_REGISTRY_HOOKS = "mqtt_discovery_registry_hooks"
-DATA_MQTT_CONFIG = "mqtt_config"
 MQTT_DATA_DEVICE_TRACKER_LEGACY = "mqtt_device_tracker_legacy"
-DATA_MQTT_RELOAD_DISPATCHERS = "mqtt_reload_dispatchers"
-DATA_MQTT_RELOAD_ENTRY = "mqtt_reload_entry"
-DATA_MQTT_RELOAD_NEEDED = "mqtt_reload_needed"
-DATA_MQTT_UPDATED_CONFIG = "mqtt_updated_config"
 
 DEFAULT_PREFIX = "homeassistant"
 DEFAULT_BIRTH_WILL_TOPIC = DEFAULT_PREFIX + "/status"
@@ -48,7 +40,16 @@ DEFAULT_ENCODING = "utf-8"
 DEFAULT_QOS = 0
 DEFAULT_PAYLOAD_AVAILABLE = "online"
 DEFAULT_PAYLOAD_NOT_AVAILABLE = "offline"
+DEFAULT_PORT = 1883
 DEFAULT_RETAIN = False
+
+PROTOCOL_31 = "3.1"
+PROTOCOL_311 = "3.1.1"
+SUPPORTED_PROTOCOLS = [PROTOCOL_31, PROTOCOL_311]
+
+DEFAULT_PORT = 1883
+DEFAULT_KEEPALIVE = 60
+DEFAULT_PROTOCOL = PROTOCOL_311
 
 DEFAULT_BIRTH = {
     ATTR_TOPIC: DEFAULT_BIRTH_WILL_TOPIC,
@@ -72,9 +73,6 @@ MQTT_DISCONNECTED = "mqtt_disconnected"
 PAYLOAD_EMPTY_JSON = "{}"
 PAYLOAD_NONE = "None"
 
-PROTOCOL_31 = "3.1"
-PROTOCOL_311 = "3.1.1"
-
 PLATFORMS = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
@@ -93,6 +91,7 @@ PLATFORMS = [
     Platform.SENSOR,
     Platform.SIREN,
     Platform.SWITCH,
+    Platform.UPDATE,
     Platform.VACUUM,
 ]
 
@@ -113,5 +112,6 @@ RELOADABLE_PLATFORMS = [
     Platform.SENSOR,
     Platform.SIREN,
     Platform.SWITCH,
+    Platform.UPDATE,
     Platform.VACUUM,
 ]

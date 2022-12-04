@@ -660,24 +660,25 @@ class ConfigEntry:
         data: dict[str, Any] | None = None,
     ) -> None:
         """Start a reauth flow."""
-        flow_context = {
-            "source": SOURCE_REAUTH,
-            "entry_id": self.entry_id,
-            "title_placeholders": {"name": self.title},
-            "unique_id": self.unique_id,
-        }
-
-        if context:
-            flow_context.update(context)
-
-        for flow in hass.config_entries.flow.async_progress_by_handler(self.domain):
-            if flow["context"] == flow_context:
-                return
+        if any(
+            flow
+            for flow in hass.config_entries.flow.async_progress_by_handler(self.domain)
+            if flow["context"].get("source") == SOURCE_REAUTH
+            and flow["context"].get("entry_id") == self.entry_id
+        ):
+            # Reauth flow already in progress for this entry
+            return
 
         hass.async_create_task(
             hass.config_entries.flow.async_init(
                 self.domain,
-                context=flow_context,
+                context={
+                    "source": SOURCE_REAUTH,
+                    "entry_id": self.entry_id,
+                    "title_placeholders": {"name": self.title},
+                    "unique_id": self.unique_id,
+                }
+                | (context or {}),
                 data=self.data | (data or {}),
             )
         )
@@ -1039,7 +1040,10 @@ class ConfigEntries:
             raise UnknownEntry
 
         if entry.state is not ConfigEntryState.NOT_LOADED:
-            raise OperationNotAllowed
+            raise OperationNotAllowed(
+                f"The config entry {entry.title} ({entry.domain}) with entry_id {entry.entry_id}"
+                f" cannot be setup because is already loaded in the {entry.state} state"
+            )
 
         # Setup Component if not set up yet
         if entry.domain in self.hass.config.components:
@@ -1061,7 +1065,10 @@ class ConfigEntries:
             raise UnknownEntry
 
         if not entry.state.recoverable:
-            raise OperationNotAllowed
+            raise OperationNotAllowed(
+                f"The config entry {entry.title} ({entry.domain}) with entry_id "
+                f"{entry.entry_id} cannot be unloaded because it is not in a recoverable state ({entry.state})"
+            )
 
         return await entry.async_unload(self.hass)
 
