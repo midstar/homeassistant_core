@@ -20,7 +20,7 @@ from tests.common import MockConfigEntry
 DHCP_SERVICE_INFO = dhcp.DhcpServiceInfo(
     hostname="qsw-m408-4c",
     ip="192.168.1.200",
-    macaddress="245EBE000000",
+    macaddress="245ebe000000",
 )
 
 TEST_PASSWORD = "test-password"
@@ -49,7 +49,7 @@ async def test_form(hass: HomeAssistant) -> None:
         )
 
         assert result["type"] == data_entry_flow.FlowResultType.FORM
-        assert result["step_id"] == SOURCE_USER
+        assert result["step_id"] == "user"
         assert result["errors"] == {}
 
         result = await hass.config_entries.flow.async_configure(

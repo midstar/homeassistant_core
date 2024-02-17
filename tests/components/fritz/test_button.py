@@ -8,7 +8,6 @@ from homeassistant.components.fritz.const import DOMAIN
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.setup import async_setup_component
 
 from .const import MOCK_USER_DATA
 
@@ -21,7 +20,7 @@ async def test_button_setup(hass: HomeAssistant, fc_class_mock, fh_class_mock) -
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_USER_DATA)
     entry.add_to_hass(hass)
 
-    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state == ConfigEntryState.LOADED
 
@@ -36,7 +35,7 @@ async def test_button_setup(hass: HomeAssistant, fc_class_mock, fh_class_mock) -
     ("entity_id", "wrapper_method"),
     [
         ("button.mock_title_firmware_update", "async_trigger_firmware_update"),
-        ("button.mock_title_reboot", "async_trigger_reboot"),
+        ("button.mock_title_restart", "async_trigger_reboot"),
         ("button.mock_title_reconnect", "async_trigger_reconnect"),
         ("button.mock_title_cleanup", "async_trigger_cleanup"),
     ],
@@ -52,7 +51,7 @@ async def test_buttons(
     entry = MockConfigEntry(domain=DOMAIN, data=MOCK_USER_DATA)
     entry.add_to_hass(hass)
 
-    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state == ConfigEntryState.LOADED
 

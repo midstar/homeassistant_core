@@ -29,7 +29,7 @@ from .dataset_store import async_get_store
 from .discovery import async_read_zeroconf_cache
 
 if TYPE_CHECKING:
-    from pyroute2 import NDB  # pylint: disable=no-name-in-module
+    from pyroute2 import NDB
 
 
 class Neighbour(TypedDict):
@@ -121,7 +121,7 @@ def _get_routes_and_neighbors():
         NDB,
     )
 
-    with NDB() as ndb:  # pylint: disable=not-callable
+    with NDB() as ndb:
         routes, reverse_routes = _get_possible_thread_routes(ndb)
         neighbours = _get_neighbours(ndb)
 
@@ -148,7 +148,8 @@ async def async_get_config_entry_diagnostics(
                 "unexpected_routers": set(),
             },
         )
-        if mlp := record.dataset.get(MeshcopTLVType.MESHLOCALPREFIX):
+        if mlp_item := record.dataset.get(MeshcopTLVType.MESHLOCALPREFIX):
+            mlp = str(mlp_item)
             network["prefixes"].add(f"{mlp[0:4]}:{mlp[4:8]}:{mlp[8:12]}:{mlp[12:16]}")
 
     # Find all routes currently act that might be thread related, so we can match them to

@@ -8,7 +8,11 @@ from homeassistant.components.ffmpeg import (
     SERVICE_START,
     SERVICE_STOP,
 )
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    EVENT_HOMEASSISTANT_START,
+    EVENT_HOMEASSISTANT_STOP,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.setup import async_setup_component, setup_component
 
@@ -50,11 +54,11 @@ class MockFFmpegDev(ffmpeg.FFmpegBase):
 
     def __init__(self, hass, initial_state=True, entity_id="test.ffmpeg_device"):
         """Initialize mock."""
-        super().__init__(initial_state)
+        super().__init__(None, initial_state)
 
         self.hass = hass
         self.entity_id = entity_id
-        self.ffmpeg = MagicMock
+        self.ffmpeg = MagicMock()
         self.called_stop = False
         self.called_start = False
         self.called_restart = False
@@ -71,32 +75,26 @@ class MockFFmpegDev(ffmpeg.FFmpegBase):
         self.called_entities = entity_ids
 
 
-class TestFFmpegSetup:
-    """Test class for ffmpeg."""
-
-    def setup_method(self):
-        """Set up things to be run when tests are started."""
-        self.hass = get_test_home_assistant()
-
-    def teardown_method(self):
-        """Stop everything that was started."""
-        self.hass.stop()
-
-    def test_setup_component(self):
-        """Set up ffmpeg component."""
+def test_setup_component():
+    """Set up ffmpeg component."""
+    with get_test_home_assistant() as hass:
         with assert_setup_component(1):
-            setup_component(self.hass, ffmpeg.DOMAIN, {ffmpeg.DOMAIN: {}})
+            setup_component(hass, ffmpeg.DOMAIN, {ffmpeg.DOMAIN: {}})
 
-        assert self.hass.data[ffmpeg.DATA_FFMPEG].binary == "ffmpeg"
+        assert hass.data[ffmpeg.DATA_FFMPEG].binary == "ffmpeg"
+        hass.stop()
 
-    def test_setup_component_test_service(self):
-        """Set up ffmpeg component test services."""
+
+def test_setup_component_test_service():
+    """Set up ffmpeg component test services."""
+    with get_test_home_assistant() as hass:
         with assert_setup_component(1):
-            setup_component(self.hass, ffmpeg.DOMAIN, {ffmpeg.DOMAIN: {}})
+            setup_component(hass, ffmpeg.DOMAIN, {ffmpeg.DOMAIN: {}})
 
-        assert self.hass.services.has_service(ffmpeg.DOMAIN, "start")
-        assert self.hass.services.has_service(ffmpeg.DOMAIN, "stop")
-        assert self.hass.services.has_service(ffmpeg.DOMAIN, "restart")
+        assert hass.services.has_service(ffmpeg.DOMAIN, "start")
+        assert hass.services.has_service(ffmpeg.DOMAIN, "stop")
+        assert hass.services.has_service(ffmpeg.DOMAIN, "restart")
+        hass.stop()
 
 
 async def test_setup_component_test_register(hass: HomeAssistant) -> None:
@@ -104,12 +102,18 @@ async def test_setup_component_test_register(hass: HomeAssistant) -> None:
     with assert_setup_component(1):
         await async_setup_component(hass, ffmpeg.DOMAIN, {ffmpeg.DOMAIN: {}})
 
-    hass.bus.async_listen_once = MagicMock()
     ffmpeg_dev = MockFFmpegDev(hass)
+    ffmpeg_dev._async_stop_ffmpeg = AsyncMock()
+    ffmpeg_dev._async_start_ffmpeg = AsyncMock()
     await ffmpeg_dev.async_added_to_hass()
 
-    assert hass.bus.async_listen_once.called
-    assert hass.bus.async_listen_once.call_count == 2
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_START)
+    await hass.async_block_till_done()
+    assert len(ffmpeg_dev._async_start_ffmpeg.mock_calls) == 2
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    assert len(ffmpeg_dev._async_stop_ffmpeg.mock_calls) == 2
 
 
 async def test_setup_component_test_register_no_startup(hass: HomeAssistant) -> None:
@@ -117,12 +121,18 @@ async def test_setup_component_test_register_no_startup(hass: HomeAssistant) -> 
     with assert_setup_component(1):
         await async_setup_component(hass, ffmpeg.DOMAIN, {ffmpeg.DOMAIN: {}})
 
-    hass.bus.async_listen_once = MagicMock()
     ffmpeg_dev = MockFFmpegDev(hass, False)
+    ffmpeg_dev._async_stop_ffmpeg = AsyncMock()
+    ffmpeg_dev._async_start_ffmpeg = AsyncMock()
     await ffmpeg_dev.async_added_to_hass()
 
-    assert hass.bus.async_listen_once.called
-    assert hass.bus.async_listen_once.call_count == 1
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_START)
+    await hass.async_block_till_done()
+    assert len(ffmpeg_dev._async_start_ffmpeg.mock_calls) == 1
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    assert len(ffmpeg_dev._async_stop_ffmpeg.mock_calls) == 2
 
 
 async def test_setup_component_test_service_start(hass: HomeAssistant) -> None:

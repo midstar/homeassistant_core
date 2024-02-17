@@ -23,7 +23,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, ServiceCall, split_entity_id
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv, entity_registry
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.json import save_json
 from homeassistant.helpers.typing import ConfigType
@@ -52,6 +52,8 @@ PS4_COMMAND_SCHEMA = vol.Schema(
 )
 
 PLATFORMS = [Platform.MEDIA_PLAYER]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 class PS4Data:
@@ -106,8 +108,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if country in COUNTRIES:
                 for device in data["devices"]:
                     device[CONF_REGION] = country
-                version = entry.version = 2
-                config_entries.async_update_entry(entry, data=data)
+                version = 2
+                config_entries.async_update_entry(entry, data=data, version=2)
                 _LOGGER.info(
                     "PlayStation 4 Config Updated: Region changed to: %s",
                     country,
@@ -116,35 +118,36 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Migrate Version 2 -> Version 3: Update identifier format.
     if version == 2:
         # Prevent changing entity_id. Updates entity registry.
-        registry = entity_registry.async_get(hass)
+        registry = er.async_get(hass)
 
-        for entity_id, e_entry in registry.entities.items():
-            if e_entry.config_entry_id == entry.entry_id:
-                unique_id = e_entry.unique_id
+        for e_entry in registry.entities.get_entries_for_config_entry_id(
+            entry.entry_id
+        ):
+            unique_id = e_entry.unique_id
+            entity_id = e_entry.entity_id
 
-                # Remove old entity entry.
-                registry.async_remove(entity_id)
+            # Remove old entity entry.
+            registry.async_remove(entity_id)
 
-                # Format old unique_id.
-                unique_id = format_unique_id(entry.data[CONF_TOKEN], unique_id)
+            # Format old unique_id.
+            unique_id = format_unique_id(entry.data[CONF_TOKEN], unique_id)
 
-                # Create new entry with old entity_id.
-                new_id = split_entity_id(entity_id)[1]
-                registry.async_get_or_create(
-                    "media_player",
-                    DOMAIN,
-                    unique_id,
-                    suggested_object_id=new_id,
-                    config_entry=entry,
-                    device_id=e_entry.device_id,
-                )
-                entry.version = 3
-                _LOGGER.info(
-                    "PlayStation 4 identifier for entity: %s has changed",
-                    entity_id,
-                )
-                config_entries.async_update_entry(entry)
-                return True
+            # Create new entry with old entity_id.
+            new_id = split_entity_id(entity_id)[1]
+            registry.async_get_or_create(
+                "media_player",
+                DOMAIN,
+                unique_id,
+                suggested_object_id=new_id,
+                config_entry=entry,
+                device_id=e_entry.device_id,
+            )
+            _LOGGER.info(
+                "PlayStation 4 identifier for entity: %s has changed",
+                entity_id,
+            )
+            config_entries.async_update_entry(entry, version=3)
+            return True
 
     msg = f"""{reason[version]} for the PlayStation 4 Integration.
             Please remove the PS4 Integration and re-configure

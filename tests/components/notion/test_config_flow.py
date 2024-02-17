@@ -5,12 +5,14 @@ from aionotion.errors import InvalidCredentialsError, NotionError
 import pytest
 
 from homeassistant import data_entry_flow
-from homeassistant.components.notion import DOMAIN
+from homeassistant.components.notion import CONF_REFRESH_TOKEN, CONF_USER_UUID, DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .conftest import TEST_PASSWORD, TEST_USERNAME
+from .conftest import TEST_REFRESH_TOKEN, TEST_USER_UUID, TEST_USERNAME
+
+pytestmark = pytest.mark.usefixtures("mock_setup_entry")
 
 
 @pytest.mark.parametrize(
@@ -38,7 +40,7 @@ async def test_create_entry(
 
     # Test errors that can arise when getting a Notion API client:
     with patch(
-        "homeassistant.components.notion.config_flow.async_get_client",
+        "homeassistant.components.notion.config_flow.async_get_client_with_credentials",
         get_client_with_exception,
     ):
         result = await hass.config_entries.flow.async_init(
@@ -53,12 +55,13 @@ async def test_create_entry(
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert result["title"] == TEST_USERNAME
     assert result["data"] == {
+        CONF_REFRESH_TOKEN: TEST_REFRESH_TOKEN,
         CONF_USERNAME: TEST_USERNAME,
-        CONF_PASSWORD: TEST_PASSWORD,
+        CONF_USER_UUID: TEST_USER_UUID,
     }
 
 
-async def test_duplicate_error(hass: HomeAssistant, config, setup_config_entry) -> None:
+async def test_duplicate_error(hass: HomeAssistant, config, config_entry) -> None:
     """Test that errors are shown when duplicates are added."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}, data=config
@@ -81,7 +84,7 @@ async def test_reauth(
     config_entry,
     errors,
     get_client_with_exception,
-    setup_config_entry,
+    mock_aionotion,
 ) -> None:
     """Test that re-auth works."""
     result = await hass.config_entries.flow.async_init(
@@ -97,7 +100,7 @@ async def test_reauth(
 
     # Test errors that can arise when getting a Notion API client:
     with patch(
-        "homeassistant.components.notion.config_flow.async_get_client",
+        "homeassistant.components.notion.config_flow.async_get_client_with_credentials",
         get_client_with_exception,
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -109,6 +112,11 @@ async def test_reauth(
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input={CONF_PASSWORD: "password"}
     )
+    # Block to ensure the setup_config_entry fixture does not
+    # get undone before hass is shutdown so we do not try
+    # to setup the config entry via reload.
+    await hass.async_block_till_done()
+
     assert result["type"] == data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert len(hass.config_entries.async_entries()) == 1

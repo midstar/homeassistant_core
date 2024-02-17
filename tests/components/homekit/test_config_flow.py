@@ -13,7 +13,7 @@ from homeassistant.components.homekit.const import (
 from homeassistant.config_entries import SOURCE_IGNORE, SOURCE_IMPORT
 from homeassistant.const import CONF_NAME, CONF_PORT, EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_registry import RegistryEntry, RegistryEntryHider
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entityfilter import CONF_INCLUDE_DOMAINS
 from homeassistant.setup import async_setup_component
 
@@ -398,8 +398,8 @@ async def test_options_flow_devices(
     port_mock,
     hass: HomeAssistant,
     demo_cleanup,
-    device_reg,
-    entity_reg,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
     mock_get_source_ip,
     mock_async_zeroconf: None,
 ) -> None:
@@ -427,6 +427,7 @@ async def test_options_flow_devices(
     demo_config_entry = MockConfigEntry(domain="domain")
     demo_config_entry.add_to_hass(hass)
 
+    assert await async_setup_component(hass, "homeassistant", {})
     assert await async_setup_component(hass, "demo", {"demo": {}})
     assert await async_setup_component(hass, "homekit", {"homekit": {}})
 
@@ -451,7 +452,7 @@ async def test_options_flow_devices(
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "exclude"
 
-    entry = entity_reg.async_get("light.ceiling_lights")
+    entry = entity_registry.async_get("light.ceiling_lights")
     assert entry is not None
     device_id = entry.device_id
 
@@ -888,7 +889,7 @@ async def test_options_flow_include_mode_with_cameras(
         "filter": {
             "exclude_domains": [],
             "exclude_entities": [],
-            "include_domains": ["fan", "vacuum", "climate"],
+            "include_domains": ["climate", "fan", "vacuum"],
             "include_entities": ["camera.native_h264", "camera.transcode_h264"],
         },
         "entity_config": {"camera.native_h264": {"video_codec": "copy"}},
@@ -903,15 +904,15 @@ async def test_options_flow_include_mode_with_cameras(
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "init"
     assert result["data_schema"]({}) == {
-        "domains": ["fan", "vacuum", "climate", "camera"],
+        "domains": ["climate", "fan", "vacuum", "camera"],
         "mode": "bridge",
         "include_exclude_mode": "include",
     }
     schema = result["data_schema"].schema
     assert _get_schema_default(schema, "domains") == [
+        "climate",
         "fan",
         "vacuum",
-        "climate",
         "camera",
     ]
     assert _get_schema_default(schema, "mode") == "bridge"
@@ -920,7 +921,7 @@ async def test_options_flow_include_mode_with_cameras(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
-            "domains": ["fan", "vacuum", "climate", "camera"],
+            "domains": ["climate", "fan", "vacuum", "camera"],
             "include_exclude_mode": "exclude",
         },
     )
@@ -958,11 +959,11 @@ async def test_options_flow_include_mode_with_cameras(
 
     assert result3["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert config_entry.options == {
-        "entity_config": {"camera.native_h264": {}},
+        "entity_config": {},
         "filter": {
             "exclude_domains": [],
             "exclude_entities": ["climate.old", "camera.excluded"],
-            "include_domains": ["fan", "vacuum", "climate", "camera"],
+            "include_domains": ["climate", "fan", "vacuum", "camera"],
             "include_entities": [],
         },
         "mode": "bridge",
@@ -1024,7 +1025,7 @@ async def test_options_flow_with_camera_audio(
         "filter": {
             "exclude_domains": [],
             "exclude_entities": [],
-            "include_domains": ["fan", "vacuum", "climate"],
+            "include_domains": ["climate", "fan", "vacuum"],
             "include_entities": ["camera.audio", "camera.no_audio"],
         },
         "entity_config": {"camera.audio": {"support_audio": True}},
@@ -1039,15 +1040,15 @@ async def test_options_flow_with_camera_audio(
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "init"
     assert result["data_schema"]({}) == {
-        "domains": ["fan", "vacuum", "climate", "camera"],
+        "domains": ["climate", "fan", "vacuum", "camera"],
         "mode": "bridge",
         "include_exclude_mode": "include",
     }
     schema = result["data_schema"].schema
     assert _get_schema_default(schema, "domains") == [
+        "climate",
         "fan",
         "vacuum",
-        "climate",
         "camera",
     ]
     assert _get_schema_default(schema, "mode") == "bridge"
@@ -1057,7 +1058,7 @@ async def test_options_flow_with_camera_audio(
         result["flow_id"],
         user_input={
             "include_exclude_mode": "exclude",
-            "domains": ["fan", "vacuum", "climate", "camera"],
+            "domains": ["climate", "fan", "vacuum", "camera"],
         },
     )
 
@@ -1094,11 +1095,11 @@ async def test_options_flow_with_camera_audio(
 
     assert result3["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
     assert config_entry.options == {
-        "entity_config": {"camera.audio": {}},
+        "entity_config": {},
         "filter": {
             "exclude_domains": [],
             "exclude_entities": ["climate.old", "camera.excluded"],
-            "include_domains": ["fan", "vacuum", "climate", "camera"],
+            "include_domains": ["climate", "fan", "vacuum", "camera"],
             "include_entities": [],
         },
         "mode": "bridge",
@@ -1379,7 +1380,7 @@ async def test_options_flow_exclude_mode_skips_category_entities(
     mock_get_source_ip,
     hk_driver,
     mock_async_zeroconf: None,
-    entity_reg,
+    entity_registry: er.EntityRegistry,
 ) -> None:
     """Ensure exclude mode does not offer category entities."""
     config_entry = _mock_config_entry_with_options_populated()
@@ -1389,7 +1390,7 @@ async def test_options_flow_exclude_mode_skips_category_entities(
     hass.states.async_set("media_player.sonos", "off")
     hass.states.async_set("switch.other", "off")
 
-    sonos_config_switch: RegistryEntry = entity_reg.async_get_or_create(
+    sonos_config_switch = entity_registry.async_get_or_create(
         "switch",
         "sonos",
         "config",
@@ -1398,7 +1399,7 @@ async def test_options_flow_exclude_mode_skips_category_entities(
     )
     hass.states.async_set(sonos_config_switch.entity_id, "off")
 
-    sonos_notconfig_switch: RegistryEntry = entity_reg.async_get_or_create(
+    sonos_notconfig_switch = entity_registry.async_get_or_create(
         "switch",
         "sonos",
         "notconfig",
@@ -1443,7 +1444,7 @@ async def test_options_flow_exclude_mode_skips_category_entities(
 
     # sonos_config_switch.entity_id is a config category entity
     # so it should not be selectable since it will always be excluded
-    with pytest.raises(vol.error.MultipleInvalid):
+    with pytest.raises(vol.error.Invalid):
         await hass.config_entries.options.async_configure(
             result2["flow_id"],
             user_input={"entities": [sonos_config_switch.entity_id]},
@@ -1484,7 +1485,7 @@ async def test_options_flow_exclude_mode_skips_hidden_entities(
     mock_get_source_ip,
     hk_driver,
     mock_async_zeroconf: None,
-    entity_reg,
+    entity_registry: er.EntityRegistry,
 ) -> None:
     """Ensure exclude mode does not offer hidden entities."""
     config_entry = _mock_config_entry_with_options_populated()
@@ -1494,12 +1495,12 @@ async def test_options_flow_exclude_mode_skips_hidden_entities(
     hass.states.async_set("media_player.sonos", "off")
     hass.states.async_set("switch.other", "off")
 
-    sonos_hidden_switch: RegistryEntry = entity_reg.async_get_or_create(
+    sonos_hidden_switch = entity_registry.async_get_or_create(
         "switch",
         "sonos",
         "config",
         device_id="1234",
-        hidden_by=RegistryEntryHider.INTEGRATION,
+        hidden_by=er.RegistryEntryHider.INTEGRATION,
     )
     hass.states.async_set(sonos_hidden_switch.entity_id, "off")
     await hass.async_block_till_done()
@@ -1538,7 +1539,7 @@ async def test_options_flow_exclude_mode_skips_hidden_entities(
 
     # sonos_hidden_switch.entity_id is a hidden entity
     # so it should not be selectable since it will always be excluded
-    with pytest.raises(vol.error.MultipleInvalid):
+    with pytest.raises(vol.error.Invalid):
         await hass.config_entries.options.async_configure(
             result2["flow_id"],
             user_input={"entities": [sonos_hidden_switch.entity_id]},
@@ -1569,7 +1570,7 @@ async def test_options_flow_include_mode_allows_hidden_entities(
     mock_get_source_ip,
     hk_driver,
     mock_async_zeroconf: None,
-    entity_reg,
+    entity_registry: er.EntityRegistry,
 ) -> None:
     """Ensure include mode does not offer hidden entities."""
     config_entry = _mock_config_entry_with_options_populated()
@@ -1579,12 +1580,12 @@ async def test_options_flow_include_mode_allows_hidden_entities(
     hass.states.async_set("media_player.sonos", "off")
     hass.states.async_set("switch.other", "off")
 
-    sonos_hidden_switch: RegistryEntry = entity_reg.async_get_or_create(
+    sonos_hidden_switch = entity_registry.async_get_or_create(
         "switch",
         "sonos",
         "config",
         device_id="1234",
-        hidden_by=RegistryEntryHider.INTEGRATION,
+        hidden_by=er.RegistryEntryHider.INTEGRATION,
     )
     hass.states.async_set(sonos_hidden_switch.entity_id, "off")
     await hass.async_block_till_done()
